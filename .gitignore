@@ -1,0 +1,61 @@
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+
+# Logs
+*.log
+logs/
+cs2-ds/game/csgo/addons/counterstrikesharp/logs/
+cs2-ds/game/bin/win64/counterstrikesharp.log
+cs2-ds/game/bin/win64/metamod-fatal.log
+steamcmd/logs/
+
+# CS2 dedicated server (binarios pesados, baixados via steamcmd)
+cs2-ds/
+
+# SteamCMD (gigante e baixado de novo facilmente)
+steamcmd/
+
+# MariaDB (binarios + dados sao locais e gigantes)
+mariadb/
+mariadb-data/
+
+# Backups gerados pelo painel ou MatchZy
+**/_backups/
+*.bak
+*.bak.*
+**/MatchZy/backups/
+*backup_round*.json
+*backup_round*.cfg
+
+# Demo files
+*.dem
+**/MatchZy/*.dem
+
+# Plugin disabled folder (versoes legadas)
+cs2-ds/game/csgo/addons/counterstrikesharp/disabled_plugins/
+
+# Arquivos baixados temporariamente
+WeaponPaints.zip
+counterstrikesharp-*.zip
+*.zip
+
+# Sensitive: credenciais e configs com senha
+**/configs/plugins/WeaponPaints/WeaponPaints.json
+cs2-ds/game/csgo/cfg/server.cfg
+cs2-ds/game/csgo/cfg/private/
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Frontend test residues
+frontend/_test.txt
+frontend/index.html.test_overwrite

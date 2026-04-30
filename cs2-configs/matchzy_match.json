@@ -1,0 +1,33 @@
+{
+  "matchid": "match_1777503279995",
+  "num_maps": 1,
+  "maplist": [
+    "de_mirage"
+  ],
+  "players_per_team": 5,
+  "min_players_to_ready": 1,
+  "min_spectators_to_ready": 0,
+  "skip_veto": false,
+  "veto_first": "team1",
+  "side_type": "standard",
+  "clinch_series": true,
+  "team1": {
+    "name": "Team CT",
+    "tag": "TEAM",
+    "players": {}
+  },
+  "team2": {
+    "name": "Team T",
+    "tag": "TEAM",
+    "players": {}
+  },
+  "cvars": {
+    "mp_maxrounds": "24",
+    "mp_overtime_enable": "1",
+    "mp_overtime_maxrounds": "6",
+    "mp_overtime_startmoney": "10000",
+    "mp_team_timeout_time": "30",
+    "mp_technical_timeout_duration_s": "120",
+    "sv_pure": "0"
+  }
+}
