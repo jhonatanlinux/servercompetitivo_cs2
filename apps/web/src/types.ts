@@ -24,6 +24,8 @@ export type ServerStatus = {
   active: boolean;
   profile?: string | null;
   startedAt?: string | null;
+  matchState?: string | null;
+  matchStateChangedAt?: string | null;
   rcon: boolean;
   cs2Exe?: string | null;
   plugins?: {

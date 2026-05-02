@@ -18,6 +18,7 @@ type ShellProps = {
 };
 
 export function Shell({ status, tab, onTabChange, children }: ShellProps) {
+  const matchStateLabel = formatMatchState(status?.matchState);
   return (
     <div className="app-shell">
       <div className="map-backdrop map-layer-one" />
@@ -34,6 +35,10 @@ export function Shell({ status, tab, onTabChange, children }: ShellProps) {
           <div className="topbar-stat">
             <span>Servidor</span>
             <strong>{status?.active ? status.profile || 'Online' : 'Offline'}</strong>
+          </div>
+          <div className="topbar-stat state-stat">
+            <span>Estado</span>
+            <strong>{matchStateLabel}</strong>
           </div>
           <div className="status-pill">
             <span className={status?.active ? 'dot on' : 'dot'} />
@@ -57,4 +62,21 @@ export function Shell({ status, tab, onTabChange, children }: ShellProps) {
       <main className="page-wrap">{children}</main>
     </div>
   );
+}
+
+function formatMatchState(state?: string | null) {
+  const labels: Record<string, string> = {
+    idle: 'Standby',
+    setup: 'Setup',
+    warmup: 'Warmup',
+    ready: 'Ready',
+    knife: 'Knife',
+    live: 'Live',
+    paused: 'Pausado',
+    tech_paused: 'Tech pause',
+    restore_pending: 'Restore',
+    ended: 'Encerrado',
+    archived: 'Arquivado',
+  };
+  return state ? labels[state] || state : 'Standby';
 }

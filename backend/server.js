@@ -8,6 +8,15 @@ const { spawn, execFile } = require('child_process');
 const rcon = require('./rcon');
 const cfgGenerator = require('./cfgGenerator');
 const { applyVetoToConfig, buildVetoConfig } = require('./vetoRules');
+const {
+  buildCompetitiveCommands,
+  buildMatchzyCvars,
+  buildStartMatchCommands,
+  validateCompetitiveConfig,
+} = require('./domain/ruleSets');
+const { MATCH_STATES, canTransition, transitionMatch } = require('./domain/matchStateMachine');
+const { validateMatchRosters } = require('./domain/rosterRules');
+const { createAuditLogger } = require('./domain/auditLog');
 
 const app = express();
 const server = http.createServer(app);
@@ -20,6 +29,7 @@ const WEB_DIST_INDEX = path.join(WEB_DIST_DIR, 'index.html');
 const CFG_DIR = path.join(ROOT_DIR, 'cs2-configs');
 const DS_DIR = path.join(ROOT_DIR, 'cs2-ds');
 const ARCHIVE_DIR = path.join(ROOT_DIR, 'event-archive');
+const AUDIT_LOG_FILE = path.join(ARCHIVE_DIR, 'audit-log.jsonl');
 const MARIADB_DIR = path.join(ROOT_DIR, 'mariadb');
 const MARIADB_DATA_DIR = path.join(ROOT_DIR, 'mariadb-data');
 const DEFAULT_RCON_PASSWORD = process.env.CS2_RCON_PASSWORD || 'cs2lan';
@@ -55,9 +65,12 @@ let state = {
   profile: null,
   processPid: null,
   cs2Exe: null,
+  matchState: MATCH_STATES.IDLE,
+  matchStateChangedAt: null,
 };
 let matchJson = null;
 let serverProcess = null;
+const audit = createAuditLogger(AUDIT_LOG_FILE);
 
 function broadcast(type, data) {
   const msg = JSON.stringify({ type, data, ts: Date.now() });
@@ -69,6 +82,35 @@ function broadcast(type, data) {
 function log(message, level = 'info') {
   console.log(`[${level}] ${message}`);
   broadcast('log', { message, level, time: new Date().toLocaleTimeString('pt-BR') });
+}
+
+function auditAction(action, payload = {}) {
+  const entry = audit.append(action, {
+    matchState: state.matchState,
+    active: state.active,
+    eventName: state.config && state.config.eventName,
+    teamCT: state.config && state.config.teamCT,
+    teamT: state.config && state.config.teamT,
+    ...payload,
+  });
+  broadcast('audit', entry);
+  return entry;
+}
+
+function setMatchState(next, meta = {}) {
+  try {
+    const transition = transitionMatch(state.matchState, next, meta);
+    state.matchState = transition.state;
+    state.matchStateChangedAt = transition.changedAt;
+    auditAction('match_state_change', transition);
+    broadcast('status', { matchState: state.matchState, matchStateChangedAt: state.matchStateChangedAt });
+    return transition;
+  } catch (err) {
+    log(`Fluxo de partida: ${err.message}`, 'warn');
+    state.matchState = next;
+    state.matchStateChangedAt = new Date().toISOString();
+    return { state: next, warning: err.message };
+  }
 }
 
 function sleep(ms) {
@@ -167,6 +209,8 @@ function normalizeConfig(input) {
     veto,
     gotv: input.gotv !== false,
     overtime: true,
+    rosterValidation: validateMatchRosters(input, { requireFive: false, requireSteamId: false }),
+    ruleWarnings: validateCompetitiveConfig({ ...input, maxRounds, timeoutDur, useMatchzy, minReady: normalizeMinReady(input, useMatchzy) }),
   };
 }
 
@@ -448,6 +492,7 @@ function startServerProcess(c, cs2Exe) {
     serverProcess = null;
     state.active = false;
     state.processPid = null;
+    setMatchState(MATCH_STATES.IDLE, { reason: 'server_exit', code, signal });
     rcon.disconnect().catch(() => {});
     broadcast('status', { active: false, rcon: false });
   });
@@ -512,40 +557,7 @@ function buildMatchzyJson(c) {
     },
   };
 
-  config.cvars = {
-    mp_maxrounds: String(c.maxRounds),
-    mp_startmoney: '800',
-    mp_afterroundmoney: '0',
-    mp_maxmoney: '16000',
-    mp_freezetime: '15',
-    mp_buytime: '20',
-    mp_buy_anywhere: '0',
-    sv_infinite_ammo: '0',
-    mp_free_armor: '0',
-    mp_respawn_on_death_ct: '0',
-    mp_respawn_on_death_t: '0',
-    mp_playercashawards: '1',
-    mp_teamcashawards: '1',
-    mp_friendlyfire: '0',
-    ff_damage_reduction_bullets: '0',
-    ff_damage_reduction_grenade: '0',
-    ff_damage_reduction_grenade_self: '1',
-    ff_damage_reduction_other: '0',
-    mp_overtime_enable: '1',
-    mp_overtime_maxrounds: '6',
-    mp_overtime_startmoney: '10000',
-    mp_team_timeout_time: String(c.timeoutDur),
-    mp_technical_timeout_duration_s: '120',
-    sv_pure: c.skins ? '0' : '1',
-    matchzy_minimum_ready_required: String(minReady),
-    matchzy_autoready_enabled: c.botScenario ? 'true' : 'false',
-    matchzy_autoready_simulation_enabled: 'false',
-    matchzy_autoready_simulation_allow_start_without_humans: 'false',
-    matchzy_autoready_simulation_knife_use_safe_mode: 'false',
-    bot_quota: c.botScenario ? '10' : '0',
-    bot_quota_mode: 'normal',
-    bot_difficulty: c.botScenario ? '3' : '2',
-  };
+  config.cvars = buildMatchzyCvars(c, minReady);
 
   return config;
 }
@@ -579,20 +591,7 @@ async function setupCompetitiveBotLab(c) {
     'bot_zombie 0',
     'bot_defer_to_human_goals 0',
     'bot_defer_to_human_items 0',
-    'mp_competitive_official_5v5 1',
-    'mp_startmoney 800',
-    'mp_afterroundmoney 0',
-    'mp_maxmoney 16000',
-    'mp_buy_anywhere 0',
-    'sv_infinite_ammo 0',
-    'mp_free_armor 0',
-    'mp_playercashawards 1',
-    'mp_teamcashawards 1',
-    'mp_friendlyfire 0',
-    'ff_damage_reduction_bullets 0',
-    'ff_damage_reduction_grenade 0',
-    'ff_damage_reduction_grenade_self 1',
-    'ff_damage_reduction_other 0',
+    ...buildCompetitiveCommands(c),
     `mp_teamname_1 "${q(c.teamCT || 'BOT CT')}"`,
     `mp_teamname_2 "${q(c.teamT || 'BOT TR')}"`,
     'mp_respawn_on_death_ct 0',
@@ -646,20 +645,7 @@ async function setupNativeCompetitiveBotLab(c) {
     'bot_zombie 0',
     'bot_defer_to_human_goals 0',
     'bot_defer_to_human_items 0',
-    'mp_competitive_official_5v5 1',
-    'mp_startmoney 800',
-    'mp_afterroundmoney 0',
-    'mp_maxmoney 16000',
-    'mp_buy_anywhere 0',
-    'sv_infinite_ammo 0',
-    'mp_free_armor 0',
-    'mp_playercashawards 1',
-    'mp_teamcashawards 1',
-    'mp_friendlyfire 0',
-    'ff_damage_reduction_bullets 0',
-    'ff_damage_reduction_grenade 0',
-    'ff_damage_reduction_grenade_self 1',
-    'ff_damage_reduction_other 0',
+    ...buildCompetitiveCommands(c),
     `mp_teamname_1 "${q(c.teamCT || 'BOT CT')}"`,
     `mp_teamname_2 "${q(c.teamT || 'BOT TR')}"`,
   ];
@@ -699,33 +685,7 @@ async function configureRunningServer(c) {
     `rcon_password "${q(c.rconPassword)}"`,
     c.skins ? 'sv_pure 0' : 'sv_pure 1',
     'sv_lan 1',
-    'mp_competitive_official_5v5 1',
-    `mp_maxrounds ${c.maxRounds}`,
-    'mp_startmoney 800',
-    'mp_afterroundmoney 0',
-    'mp_maxmoney 16000',
-    'mp_halftime 1',
-    'mp_overtime_enable 1',
-    'mp_overtime_maxrounds 6',
-    'mp_overtime_startmoney 10000',
-    `mp_team_timeout_time ${c.timeoutDur}`,
-    'mp_technical_timeout_per_team 1',
-    'mp_technical_timeout_duration_s 120',
-    'mp_freezetime 15',
-    'mp_buytime 20',
-    'mp_buy_anywhere 0',
-    'sv_infinite_ammo 0',
-    'mp_free_armor 0',
-    'mp_respawn_on_death_ct 0',
-    'mp_respawn_on_death_t 0',
-    'mp_playercashawards 1',
-    'mp_teamcashawards 1',
-    'mp_friendlyfire 0',
-    'ff_damage_reduction_bullets 0',
-    'ff_damage_reduction_grenade 0',
-    'ff_damage_reduction_grenade_self 1',
-    'ff_damage_reduction_other 0',
-    'mp_roundtime_defuse 1.92',
+    ...buildCompetitiveCommands(c),
     `mp_teamname_1 "${q(c.teamCT || 'Team CT')}"`,
     `mp_teamname_2 "${q(c.teamT || 'Team T')}"`,
     'mp_spectators_max 2',
@@ -761,6 +721,8 @@ app.get('/api/status', (req, res) => {
     config: state.config,
     startedAt: state.startedAt,
     profile: state.profile,
+    matchState: state.matchState,
+    matchStateChangedAt: state.matchStateChangedAt,
     processPid: state.processPid,
     cs2Exe: state.cs2Exe,
     plugins: cs2Exe ? getPluginHealth(cs2Exe) : null,
@@ -783,6 +745,7 @@ app.post('/api/rcon/send', async (req, res) => {
   if (/^\s*matchzy_forceready\b/i.test(command)) {
     return res.status(403).json({ ok: false, error: 'forceready bloqueado: aguarde os 10 jogadores usarem .ready' });
   }
+  auditAction('rcon_send', { command });
   res.json(await send(command));
 });
 
@@ -841,6 +804,8 @@ app.post('/api/launch', async (req, res) => {
     await configureRunningServer(c);
 
     state.active = true;
+    setMatchState(c.warmup ? MATCH_STATES.WARMUP : MATCH_STATES.SETUP, { reason: 'launch' });
+    auditAction('launch_server', { profile: c.profile, skins: c.skins, botScenario: c.botScenario, useMatchzy: c.useMatchzy });
     broadcast('status', { active: true, rcon: true });
     log('Servidor pronto para uso pelo painel.', 'ok');
     return res.json({ ok: true, profile: c.profile, pid: state.processPid });
@@ -902,6 +867,8 @@ app.post('/api/veto/start', async (req, res) => {
     resetPlayerStats();
     await configureRunningServer(next);
     state.active = true;
+    setMatchState(MATCH_STATES.WARMUP, { reason: 'veto_start' });
+    auditAction('veto_start_server', { series: next.veto && next.veto.series, maps: next.maps, sideChoice: next.sideChoice });
     broadcast('status', { active: true, rcon: true });
     res.json({ ok: true, profile: next.profile, pid: state.processPid, config: next, veto: next.veto });
   } catch (err) {
@@ -918,6 +885,8 @@ app.get('/api/matchzy/serve', (req, res) => {
 app.post('/api/session/stop', async (req, res) => {
   try {
     state.active = false;
+    setMatchState(MATCH_STATES.IDLE, { reason: 'session_stop' });
+    auditAction('stop_session');
     await stopServerProcess();
     await rcon.disconnect();
     log('Sessao encerrada', 'warn');
@@ -946,42 +915,11 @@ const actions = {
 async function startCompetitiveMatchAction() {
   state.startedAt = new Date().toISOString();
   resetPlayerStats();
+  setMatchState(MATCH_STATES.LIVE, { reason: 'operator_start_match' });
   broadcast('status', { active: state.active, rcon: rcon.connected(), matchReset: true });
-  const cmds = [
-    'css_plugins reload MTLiveStats',
-    'mp_warmup_end',
-    'mp_competitive_official_5v5 1',
-    'mp_maxrounds 24',
-    'mp_startmoney 800',
-    'mp_afterroundmoney 0',
-    'mp_maxmoney 16000',
-    'mp_buy_anywhere 0',
-    'sv_infinite_ammo 0',
-    'mp_free_armor 0',
-    'mp_respawn_on_death_ct 0',
-    'mp_respawn_on_death_t 0',
-    'mp_playercashawards 1',
-    'mp_teamcashawards 1',
-    'mp_friendlyfire 0',
-    'ff_damage_reduction_bullets 0',
-    'ff_damage_reduction_grenade 0',
-    'ff_damage_reduction_grenade_self 1',
-    'ff_damage_reduction_other 0',
-    'mp_give_player_c4 1',
-    'mp_death_drop_gun 1',
-    'mp_freezetime 15',
-    'mp_buytime 20',
-    'mp_roundtime 1.92',
-    'mp_roundtime_defuse 1.92',
-    'mp_overtime_enable 1',
-    'mp_overtime_maxrounds 6',
-    'mp_overtime_startmoney 10000',
-    'mp_team_timeout_time 30',
-    'mp_technical_timeout_per_team 1',
-    'mp_technical_timeout_duration_s 120',
-    'mp_restartgame 1',
-  ];
+  const cmds = buildStartMatchCommands(state.config || {});
   await sendMany(cmds, 120);
+  auditAction('start_match', { commandCount: cmds.length });
   log('Partida competitiva iniciada com MR12, startmoney 800 e stats resetadas.', 'ok');
   return { ok: true, response: 'Partida competitiva iniciada e stats resetadas.' };
 }
@@ -989,6 +927,7 @@ async function startCompetitiveMatchAction() {
 Object.entries(actions).forEach(([route, cmd]) => {
   app.post(`/api/action/${route}`, async (req, res) => {
     log(cmd, 'ok');
+    auditAction('panel_action', { route, command: cmd });
     res.json(await send(cmd));
   });
 });
@@ -1000,6 +939,19 @@ app.post('/api/action/start-match', async (req, res) => {
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
   }
+});
+
+app.get('/api/audit-log', (req, res) => {
+  res.json({ ok: true, entries: audit.read(300) });
+});
+
+app.get('/api/rulesets', (req, res) => {
+  res.json({
+    ok: true,
+    active: 'official-mr12-no-friendly-fire',
+    competitive: buildMatchzyCvars(state.config || {}, normalizeMinReady(state.config || {}, true)),
+    warnings: state.config ? validateCompetitiveConfig(state.config) : [],
+  });
 });
 
 app.post('/api/action/changemap', async (req, res) => {
@@ -1165,7 +1117,7 @@ async function getNativeStatusFallback() {
 
 app.get('/api/matchzy/score', async (req, res) => {
   if (!rcon.connected()) return res.status(503).json({ ok: false, error: 'RCON nao conectado' });
-  const r = await send('get5_status');
+  const r = await send('matchzy_status');
   if (!r.ok) return res.status(500).json({ ok: false, error: r.error });
   const parsed = parseMatchzyStatus(r.response);
   if (!parsed || parsed.matchMode === 'none' || !parsed.matchMode || parsed.team1Score == null) {
@@ -1229,6 +1181,9 @@ app.get('/api/matchzy/backups', (req, res) => {
 
 app.post('/api/matchzy/restore', async (req, res) => {
   if (!rcon.connected()) return res.status(503).json({ ok: false, error: 'RCON nao conectado' });
+  if (!canTransition(state.matchState, MATCH_STATES.RESTORE_PENDING)) {
+    return res.status(409).json({ ok: false, error: `restore bloqueado no estado atual: ${state.matchState}` });
+  }
   const round = parseInt(req.body && req.body.round);
   if (!Number.isFinite(round) || round < 0) return res.status(400).json({ ok: false, error: 'round invalido' });
   const backup = listRoundBackups({ currentOnly: true }).find((b) => b.round === round)
@@ -1237,14 +1192,20 @@ app.post('/api/matchzy/restore', async (req, res) => {
     ? `mp_backup_restore_load_file ${backup.file}`
     : `css_restore_round ${round}`;
   log(`RESTORE ROUND ${round} -> ${cmd}`, 'warn');
+  setMatchState(MATCH_STATES.RESTORE_PENDING, { reason: 'restore_round', round });
+  auditAction('restore_round', { round, command: cmd, file: backup && backup.file });
   const r = await send(cmd);
   res.json({ ok: r.ok, command: cmd, file: backup && backup.file, response: r.response, error: r.error });
 });
 
 app.post('/api/matchzy/redo-round', async (req, res) => {
   if (!rcon.connected()) return res.status(503).json({ ok: false, error: 'RCON nao conectado' });
-  const st = await send('get5_status');
-  if (!st.ok) return res.status(500).json({ ok: false, error: 'get5_status falhou: ' + st.error });
+  if (!canTransition(state.matchState, MATCH_STATES.RESTORE_PENDING)) {
+    return res.status(409).json({ ok: false, error: `redo bloqueado no estado atual: ${state.matchState}` });
+  }
+  setMatchState(MATCH_STATES.RESTORE_PENDING, { reason: 'redo_round' });
+  const st = await send('matchzy_status');
+  if (!st.ok) return res.status(500).json({ ok: false, error: 'matchzy_status falhou: ' + st.error });
   const parsed = parseMatchzyStatus(st.response);
   const round = parsed && parsed.roundNumber;
   if (!round) return res.status(500).json({ ok: false, error: 'nao consegui detectar round atual' });
@@ -1555,7 +1516,7 @@ function findDemoFiles(startedAt) {
 
 async function getCurrentMatchSnapshot() {
   if (rcon.connected()) {
-    const r = await send('get5_status');
+    const r = await send('matchzy_status');
     const parsed = r.ok ? parseMatchzyStatus(r.response) : null;
     if (parsed && parsed.matchMode !== 'none' && parsed.team1Score != null) {
       return { ...parsed, source: 'matchzy-status' };
