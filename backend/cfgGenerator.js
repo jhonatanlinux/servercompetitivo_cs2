@@ -15,6 +15,10 @@ const OFFICIAL_MAPS = [
   { name: 'Overpass', cmd: 'de_overpass' },
 ];
 
+function cfgq(value) {
+  return String(value ?? '').replace(/"/g, "'");
+}
+
 function serverCfg(c) {
   const maxRounds = Number(c.maxRounds || 24);
   const timeoutDur = Number(c.timeoutDur || 30);
@@ -24,9 +28,9 @@ function serverCfg(c) {
 //  Gerado em: ${new Date().toLocaleString('pt-BR')}
 // ============================================================
 
-hostname "${c.eventName || 'CS2 LAN'} | ${c.teamCT || 'Team CT'} vs ${c.teamT || 'Team T'}"
-sv_password "${c.serverPassword || ''}"
-rcon_password "${c.rconPassword || 'cs2lan'}"
+hostname "${cfgq(c.eventName || 'CS2 LAN')} | ${cfgq(c.teamCT || 'Team CT')} vs ${cfgq(c.teamT || 'Team T')}"
+sv_password "${cfgq(c.serverPassword || '')}"
+rcon_password "${cfgq(c.rconPassword || 'cs2lan')}"
 
 sv_cheats 0
 sv_lan 1
@@ -63,8 +67,8 @@ mp_pause_match_limit_rounds 0
 mp_technical_timeout_per_team 1
 mp_technical_timeout_duration_s 120
 
-mp_teamname_1 "${c.teamCT || 'Team CT'}"
-mp_teamname_2 "${c.teamT || 'Team T'}"
+mp_teamname_1 "${cfgq(c.teamCT || 'Team CT')}"
+mp_teamname_2 "${cfgq(c.teamT || 'Team T')}"
 mp_team_intro_time 0
 
 ${c.gotv ? `tv_enable 1
@@ -81,6 +85,9 @@ exec warmup.cfg
 
 function warmupCfg(c) {
   const maps = OFFICIAL_MAPS.map(m => m.name).join(', ');
+  const evt = cfgq(c.eventName || 'CS2 LAN');
+  const teamCT = cfgq(c.teamCT || 'Team CT');
+  const teamT = cfgq(c.teamT || 'Team T');
   return `// warmup.cfg
 mp_warmup_pausetimer ${c.unlimitedWarmup ? 1 : 0}
 mp_warmuptime ${c.unlimitedWarmup ? 9999 : 60}
@@ -90,6 +97,8 @@ mp_startmoney 65535
 mp_buy_anywhere 1
 mp_give_player_c4 1
 mp_death_drop_gun 0
+say "========== ${evt} =========="
+say "Confronto: ${teamCT} vs ${teamT}"
 say "== Warmup iniciado - aguarde o admin iniciar =="
 say "== Mappool oficial (Jan 2026): ${maps} =="
 `;
@@ -97,7 +106,9 @@ say "== Mappool oficial (Jan 2026): ${maps} =="
 
 function matchCfg(c) {
   const ts = new Date().toISOString().slice(0,19).replace(/[:.]/g,'-');
-  const evt = c.eventName || 'CS2 LAN';
+  const evt = cfgq(c.eventName || 'CS2 LAN');
+  const teamCT = cfgq(c.teamCT || 'Team CT');
+  const teamT = cfgq(c.teamT || 'Team T');
   const maxRounds = Number(c.maxRounds || 24);
   const timeoutDur = Number(c.timeoutDur || 30);
   return `// match.cfg - Partida oficial
@@ -123,6 +134,7 @@ mp_technical_timeout_duration_s 120
 ${c.autoDemo ? `tv_record "demo_${ts}"
 say "== Demo gravando: demo_${ts} =="` : ''}
 say "== PARTIDA INICIADA - ${evt} =="
+say "== ${teamCT} vs ${teamT} =="
 say "== MR12 | 3 timeouts x 30s por time | OT $10.000 =="
 `;
 }

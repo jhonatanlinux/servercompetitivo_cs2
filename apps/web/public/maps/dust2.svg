@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900">
+  <defs>
+    <linearGradient id="g" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#17130e"/>
+      <stop offset=".54" stop-color="#8b6731"/>
+      <stop offset="1" stop-color="#14110d"/>
+    </linearGradient>
+    <filter id="blur"><feGaussianBlur stdDeviation="18"/></filter>
+  </defs>
+  <rect width="1600" height="900" fill="url(#g)"/>
+  <g opacity=".28" fill="#c79b55">
+    <rect x="170" y="300" width="430" height="280" rx="14"/>
+    <rect x="660" y="230" width="240" height="390" rx="14"/>
+    <rect x="960" y="340" width="470" height="240" rx="14"/>
+  </g>
+  <g opacity=".22" stroke="#f2ce8a" stroke-width="20" fill="none" stroke-linecap="round">
+    <path d="M180 640h360l150-155h260l150-160h310"/>
+    <path d="M300 235c180 45 280 30 400 0s245-10 370 75 225 55 350 15"/>
+  </g>
+  <circle cx="1040" cy="260" r="180" fill="#ffb800" opacity=".13" filter="url(#blur)"/>
+  <text x="90" y="795" fill="#f2ce8a" opacity=".22" font-size="112" font-family="Arial Black,Arial">DUST II</text>
+</svg>
