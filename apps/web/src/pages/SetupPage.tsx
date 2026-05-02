@@ -185,7 +185,7 @@ export function SetupPage({ config, eventSetup, status, onConfigChange, onLaunch
           <label className="switch-row"><span>GOTV</span><input type="checkbox" checked={config.gotv} onChange={(event) => set('gotv', event.target.checked)} /></label>
           <label className="switch-row"><span>Gravar demo</span><input type="checkbox" checked={config.demo} onChange={(event) => set('demo', event.target.checked)} /></label>
           <label className="switch-row"><span>Warmup ao iniciar</span><input type="checkbox" checked={config.warmup} onChange={(event) => set('warmup', event.target.checked)} /></label>
-          <label className="switch-row"><span>Skins personalizadas</span><input type="checkbox" checked={config.profile === 'mix'} onChange={(event) => set('profile', event.target.checked ? 'mix' : 'competitive')} /></label>
+          <label className="switch-row"><span>Skins personalizadas</span><input type="checkbox" checked={config.skins} onChange={(event) => set('skins', event.target.checked)} /></label>
         </div>
         <div className="form-grid three">
           <label>Senha do servidor<input value={config.svPass} onChange={(event) => set('svPass', event.target.value)} placeholder="vazio = sem senha" /></label>
@@ -281,7 +281,7 @@ function buildPrematchChecks(config: LaunchConfig, status: ServerStatus | null) 
     { label: 'GOTV', state: config.gotv ? 'ok' : 'warn', detail: config.gotv ? 'Porta 27020 habilitada' : 'GOTV desligado' },
     { label: 'Demo', state: config.demo ? 'ok' : 'warn', detail: config.demo ? 'Gravacao ligada' : 'Demo desligada' },
     { label: 'RCON', state: status?.rcon ? 'ok' : 'warn', detail: status?.rcon ? 'Conectado' : 'Nao conectado' },
-    { label: 'Skins', state: config.profile === 'mix' ? 'warn' : 'ok', detail: config.profile === 'mix' ? 'Skins ON' : 'sv_pure competitivo' }
+    { label: 'Skins', state: config.skins ? 'warn' : 'ok', detail: config.skins ? 'Skins ON' : 'sv_pure competitivo' }
   ] as Array<{ label: string; state: 'ok' | 'warn' | 'fail'; detail: string }>;
 }
 

@@ -135,21 +135,22 @@ function buildBotPlayers(prefix, start) {
 }
 
 function normalizeConfig(input) {
-  const profile = input.profile === 'mix' || input.skins ? 'mix' : 'competitive';
+  const botScenario = input.botScenario === true;
+  const profile = input.profile === 'mix' ? 'mix' : 'competitive';
+  const skins = input.skins !== undefined ? input.skins === true : input.profile === 'mix';
   const maxRounds = Number(input.maxRounds || 24);
   const timeoutDur = Number(input.timeoutDur || 30);
   const rconPort = Number(input.rconPort || input.port || 27015);
   const rconPassword = input.rconPassword || input.password || DEFAULT_RCON_PASSWORD;
   const useMatchzy = input.useMatchzy !== false;
-  const botScenario = input.botScenario === true;
   const veto = buildVetoConfig(input.veto || { series: input.series, maps: input.maps, sideChoice: input.sideChoice });
 
   return {
     ...input,
     botScenario,
     profile,
-    skins: profile === 'mix',
-    customSkins: profile === 'mix',
+    skins,
+    customSkins: skins,
     autoDemo: input.demo !== false,
     unlimitedWarmup: input.warmup !== false,
     serverPassword: input.svPass || input.serverPassword || '',
@@ -329,6 +330,63 @@ async function sendMany(cmds, delayMs = 250) {
   }
 }
 
+function playerCountsFromStatus(text) {
+  const match = String(text || '').match(/players\s*:\s*(\d+)\s+humans,\s*(\d+)\s+bots/i);
+  return {
+    humans: match ? Number(match[1]) : 0,
+    bots: match ? Number(match[2]) : 0,
+  };
+}
+
+async function ensureBotLabBots() {
+  const statusBefore = await send('status');
+  const counts = statusBefore.ok ? playerCountsFromStatus(statusBefore.response) : { humans: 0, bots: 0 };
+  const targetBots = Math.max(0, 10 - counts.humans);
+  if (counts.bots === targetBots) {
+    log(`Bot Lab: ${counts.humans} humano(s) + ${counts.bots} bot(s) confirmados.`, 'ok');
+    return counts.bots;
+  }
+
+  if (counts.bots > targetBots) {
+    log(`Bot Lab: ${counts.bots} bots para ${counts.humans} humano(s); reajustando para ${targetBots}.`, 'warn');
+    await sendMany(['bot_kick', 'bot_quota 0'], 300);
+    await sleep(1000);
+  } else {
+    log(`Bot Lab: ${counts.bots}/${targetBots} bots encontrados; adicionando bots restantes.`, 'warn');
+  }
+
+  const missing = counts.bots > targetBots ? targetBots : Math.max(0, targetBots - counts.bots);
+  const cmds = [
+    'bot_quota_mode normal',
+    'bot_join_team any',
+    'bot_join_after_player 0',
+    'bot_difficulty 3',
+  ];
+
+  for (let i = 0; i < missing; i += 1) {
+    cmds.push(i % 2 === 0 ? 'bot_add_ct' : 'bot_add_t');
+  }
+  cmds.push(`bot_quota ${targetBots}`);
+
+  await sendMany(cmds, 180);
+  await sleep(1200);
+  const statusAfter = await send('status');
+  const after = statusAfter.ok ? playerCountsFromStatus(statusAfter.response) : { humans: 0, bots: 0 };
+  const targetAfter = Math.max(0, 10 - after.humans);
+  if (after.bots === targetAfter) log(`Bot Lab: ${after.humans} humano(s) + ${after.bots} bot(s) confirmados apos reforco.`, 'ok');
+  else log(`Bot Lab: ainda ha ${after.humans} humano(s) + ${after.bots}/${targetAfter} bot(s). Confira o TAB e o console do CS2.`, 'error');
+  return after.bots;
+}
+
+function scheduleBotLabReinforcement() {
+  [10000, 25000, 40000].forEach((delayMs) => {
+    setTimeout(() => {
+      if (!state.config || !state.config.botScenario || !rcon.connected()) return;
+      ensureBotLabBots().catch((err) => log(`Bot Lab reforco falhou: ${err.message}`, 'error'));
+    }, delayMs);
+  });
+}
+
 async function connectRconWithRetry(c, attempts = 80) {
   for (let i = 1; i <= attempts; i += 1) {
     if (!serverProcess) {
@@ -437,8 +495,6 @@ function buildMatchzyJson(c) {
     veto_first: c.veto && c.veto.vetoFirst === 'T' ? 'team2' : 'team1',
     map_sides: Array.from({ length: Math.max(Number(c.numMaps) || 1, 1) }, () => (c.botScenario ? 'team1_ct' : mapSide)),
     clinch_series: true,
-    simulation: Boolean(c.botScenario),
-    simulation_timescale: c.botScenario ? 1 : undefined,
     maxRounds: c.maxRounds,
     overtimeMode: 'enabled',
     overtimeSegments: 3,
@@ -456,25 +512,40 @@ function buildMatchzyJson(c) {
     },
   };
 
-  if (!c.botScenario) {
-    config.cvars = {
-      mp_maxrounds: String(c.maxRounds),
-      mp_overtime_enable: '1',
-      mp_overtime_maxrounds: '6',
-      mp_overtime_startmoney: '10000',
-      mp_team_timeout_time: String(c.timeoutDur),
-      mp_technical_timeout_duration_s: '120',
-      sv_pure: c.skins ? '0' : '1',
-      matchzy_minimum_ready_required: String(minReady),
-      matchzy_autoready_enabled: c.botScenario ? 'true' : 'false',
-      matchzy_autoready_simulation_enabled: c.botScenario ? 'true' : 'false',
-      matchzy_autoready_simulation_allow_start_without_humans: 'false',
-      matchzy_autoready_simulation_knife_use_safe_mode: 'false',
-      bot_quota: c.botScenario ? '10' : '0',
-      bot_quota_mode: c.botScenario ? 'normal' : 'normal',
-      bot_difficulty: c.botScenario ? '3' : '2',
-    };
-  }
+  config.cvars = {
+    mp_maxrounds: String(c.maxRounds),
+    mp_startmoney: '800',
+    mp_afterroundmoney: '0',
+    mp_maxmoney: '16000',
+    mp_freezetime: '15',
+    mp_buytime: '20',
+    mp_buy_anywhere: '0',
+    sv_infinite_ammo: '0',
+    mp_free_armor: '0',
+    mp_respawn_on_death_ct: '0',
+    mp_respawn_on_death_t: '0',
+    mp_playercashawards: '1',
+    mp_teamcashawards: '1',
+    mp_friendlyfire: '0',
+    ff_damage_reduction_bullets: '0',
+    ff_damage_reduction_grenade: '0',
+    ff_damage_reduction_grenade_self: '1',
+    ff_damage_reduction_other: '0',
+    mp_overtime_enable: '1',
+    mp_overtime_maxrounds: '6',
+    mp_overtime_startmoney: '10000',
+    mp_team_timeout_time: String(c.timeoutDur),
+    mp_technical_timeout_duration_s: '120',
+    sv_pure: c.skins ? '0' : '1',
+    matchzy_minimum_ready_required: String(minReady),
+    matchzy_autoready_enabled: c.botScenario ? 'true' : 'false',
+    matchzy_autoready_simulation_enabled: 'false',
+    matchzy_autoready_simulation_allow_start_without_humans: 'false',
+    matchzy_autoready_simulation_knife_use_safe_mode: 'false',
+    bot_quota: c.botScenario ? '10' : '0',
+    bot_quota_mode: 'normal',
+    bot_difficulty: c.botScenario ? '3' : '2',
+  };
 
   return config;
 }
@@ -508,40 +579,50 @@ async function setupCompetitiveBotLab(c) {
     'bot_zombie 0',
     'bot_defer_to_human_goals 0',
     'bot_defer_to_human_items 0',
+    'mp_competitive_official_5v5 1',
+    'mp_startmoney 800',
+    'mp_afterroundmoney 0',
+    'mp_maxmoney 16000',
+    'mp_buy_anywhere 0',
+    'sv_infinite_ammo 0',
+    'mp_free_armor 0',
+    'mp_playercashawards 1',
+    'mp_teamcashawards 1',
+    'mp_friendlyfire 0',
+    'ff_damage_reduction_bullets 0',
+    'ff_damage_reduction_grenade 0',
+    'ff_damage_reduction_grenade_self 1',
+    'ff_damage_reduction_other 0',
     `mp_teamname_1 "${q(c.teamCT || 'BOT CT')}"`,
     `mp_teamname_2 "${q(c.teamT || 'BOT TR')}"`,
-    'mp_respawn_on_death_ct 1',
-    'mp_respawn_on_death_t 1',
+    'mp_respawn_on_death_ct 0',
+    'mp_respawn_on_death_t 0',
     'mp_warmup_pausetimer 0',
     'mp_warmuptime 9999',
     'mp_warmup_start',
   ];
   const botCmds = [
-    'bot_quota 10',
-    'bot_add_ct',
-    'bot_add_ct',
-    'bot_add_ct',
-    'bot_add_ct',
-    'bot_add_ct',
-    'bot_add_t',
-    'bot_add_t',
-    'bot_add_t',
-    'bot_add_t',
-    'bot_add_t',
+    'bot_join_team any',
+    'bot_quota_mode normal',
     'bot_quota 10',
   ];
   const matchzyCmds = [
     'matchzy_minimum_ready_required 10',
     'matchzy_autoready_enabled true',
-    'matchzy_autoready_simulation_enabled true',
+    'matchzy_autoready_simulation_enabled false',
     'matchzy_autoready_simulation_allow_start_without_humans false',
     'matchzy_autoready_simulation_knife_use_safe_mode false',
   ];
   await sendMany(setupCmds, 200);
   await sendMany(botCmds, 200);
-  await sleep(3000);
+  await sleep(1500);
   await sendMany(botCmds, 120);
   await sendMany(matchzyCmds, 200);
+  await send('css_plugins list');
+  await ensureBotLabBots();
+  await sleep(6500);
+  await ensureBotLabBots();
+  scheduleBotLabReinforcement();
   await send('mp_restartgame 1');
   log('Bot Lab: 10 bots ativos. Entre como espectador para acompanhar.', 'ok');
 }
@@ -565,6 +646,20 @@ async function setupNativeCompetitiveBotLab(c) {
     'bot_zombie 0',
     'bot_defer_to_human_goals 0',
     'bot_defer_to_human_items 0',
+    'mp_competitive_official_5v5 1',
+    'mp_startmoney 800',
+    'mp_afterroundmoney 0',
+    'mp_maxmoney 16000',
+    'mp_buy_anywhere 0',
+    'sv_infinite_ammo 0',
+    'mp_free_armor 0',
+    'mp_playercashawards 1',
+    'mp_teamcashawards 1',
+    'mp_friendlyfire 0',
+    'ff_damage_reduction_bullets 0',
+    'ff_damage_reduction_grenade 0',
+    'ff_damage_reduction_grenade_self 1',
+    'ff_damage_reduction_other 0',
     `mp_teamname_1 "${q(c.teamCT || 'BOT CT')}"`,
     `mp_teamname_2 "${q(c.teamT || 'BOT TR')}"`,
   ];
@@ -579,6 +674,8 @@ async function setupNativeCompetitiveBotLab(c) {
     'bot_add_t',
     'bot_add_t',
     'bot_add_t',
+    'bot_join_team any',
+    'bot_quota_mode normal',
     'bot_quota 10',
   ];
   await sendMany(setupCmds, 160);
@@ -604,6 +701,9 @@ async function configureRunningServer(c) {
     'sv_lan 1',
     'mp_competitive_official_5v5 1',
     `mp_maxrounds ${c.maxRounds}`,
+    'mp_startmoney 800',
+    'mp_afterroundmoney 0',
+    'mp_maxmoney 16000',
     'mp_halftime 1',
     'mp_overtime_enable 1',
     'mp_overtime_maxrounds 6',
@@ -613,6 +713,18 @@ async function configureRunningServer(c) {
     'mp_technical_timeout_duration_s 120',
     'mp_freezetime 15',
     'mp_buytime 20',
+    'mp_buy_anywhere 0',
+    'sv_infinite_ammo 0',
+    'mp_free_armor 0',
+    'mp_respawn_on_death_ct 0',
+    'mp_respawn_on_death_t 0',
+    'mp_playercashawards 1',
+    'mp_teamcashawards 1',
+    'mp_friendlyfire 0',
+    'ff_damage_reduction_bullets 0',
+    'ff_damage_reduction_grenade 0',
+    'ff_damage_reduction_grenade_self 1',
+    'ff_damage_reduction_other 0',
     'mp_roundtime_defuse 1.92',
     `mp_teamname_1 "${q(c.teamCT || 'Team CT')}"`,
     `mp_teamname_2 "${q(c.teamT || 'Team T')}"`,
@@ -693,20 +805,21 @@ app.post('/api/launch', async (req, res) => {
     cfgGenerator.saveAll(c);
     saveMatchJsonSnapshot();
     copyGeneratedConfigs(cs2Exe);
+    const wantsSkins = c.skins === true;
     const healthBefore = getPluginHealth(cs2Exe);
     if (!healthBefore.metamod || !healthBefore.counterStrikeSharp) {
       log('Metamod/CounterStrikeSharp nao detectados. Rode INSTALAR-PLUGINS-SKINS.bat antes de usar MatchZy/skins.', 'warn');
     }
-    if (c.profile === 'mix' && !healthBefore.skins && !healthBefore.disabledSkins) {
+    if (wantsSkins && !healthBefore.skins && !healthBefore.disabledSkins) {
       log('Modo Mix selecionado, mas nenhum plugin de skins foi detectado. Comandos !knife/!gloves nao vao responder.', 'warn');
     }
-    if (c.profile === 'mix') {
+    if (wantsSkins) {
       const dbReady = await ensureMariaDbForSkins();
       if (!dbReady) {
         return res.status(500).json({ ok: false, error: 'MariaDB de skins nao iniciou. Abra INICIAR-MARIADB.bat e tente novamente.' });
       }
     }
-    setSkinPluginsEnabled(cs2Exe, c.profile === 'mix');
+    setSkinPluginsEnabled(cs2Exe, wantsSkins);
 
     if (c.botScenario && (serverProcess || rcon.connected())) {
       log('Bot Lab precisa reiniciar o CS2 DS para reservar 10 players + specs.', 'warn');
@@ -722,6 +835,9 @@ app.post('/api/launch', async (req, res) => {
       return res.status(500).json({ ok: false, error: connected.error, serverStarted: state.active });
     }
 
+    await send('css_plugins reload MTLiveStats');
+    await sleep(500);
+    resetPlayerStats();
     await configureRunningServer(c);
 
     state.active = true;
@@ -781,6 +897,9 @@ app.post('/api/veto/start', async (req, res) => {
       broadcast('status', { active: state.active, rcon: false });
       return res.status(500).json({ ok: false, error: connected.error, serverStarted: state.active });
     }
+    await send('css_plugins reload MTLiveStats');
+    await sleep(500);
+    resetPlayerStats();
     await configureRunningServer(next);
     state.active = true;
     broadcast('status', { active: true, rcon: true });
@@ -819,17 +938,68 @@ const actions = {
   'knife': 'matchzy_knife',
   'end-match': 'matchzy_endmatch',
   'restart-warmup': 'exec warmup.cfg',
-  'start-match': 'exec match.cfg',
   'practice': 'exec practice.cfg',
-  'status': 'get5_status',
+  'status': 'matchzy_status',
   'plugins': 'css_plugins list',
 };
+
+async function startCompetitiveMatchAction() {
+  state.startedAt = new Date().toISOString();
+  resetPlayerStats();
+  broadcast('status', { active: state.active, rcon: rcon.connected(), matchReset: true });
+  const cmds = [
+    'css_plugins reload MTLiveStats',
+    'mp_warmup_end',
+    'mp_competitive_official_5v5 1',
+    'mp_maxrounds 24',
+    'mp_startmoney 800',
+    'mp_afterroundmoney 0',
+    'mp_maxmoney 16000',
+    'mp_buy_anywhere 0',
+    'sv_infinite_ammo 0',
+    'mp_free_armor 0',
+    'mp_respawn_on_death_ct 0',
+    'mp_respawn_on_death_t 0',
+    'mp_playercashawards 1',
+    'mp_teamcashawards 1',
+    'mp_friendlyfire 0',
+    'ff_damage_reduction_bullets 0',
+    'ff_damage_reduction_grenade 0',
+    'ff_damage_reduction_grenade_self 1',
+    'ff_damage_reduction_other 0',
+    'mp_give_player_c4 1',
+    'mp_death_drop_gun 1',
+    'mp_freezetime 15',
+    'mp_buytime 20',
+    'mp_roundtime 1.92',
+    'mp_roundtime_defuse 1.92',
+    'mp_overtime_enable 1',
+    'mp_overtime_maxrounds 6',
+    'mp_overtime_startmoney 10000',
+    'mp_team_timeout_time 30',
+    'mp_technical_timeout_per_team 1',
+    'mp_technical_timeout_duration_s 120',
+    'mp_restartgame 1',
+  ];
+  await sendMany(cmds, 120);
+  log('Partida competitiva iniciada com MR12, startmoney 800 e stats resetadas.', 'ok');
+  return { ok: true, response: 'Partida competitiva iniciada e stats resetadas.' };
+}
 
 Object.entries(actions).forEach(([route, cmd]) => {
   app.post(`/api/action/${route}`, async (req, res) => {
     log(cmd, 'ok');
     res.json(await send(cmd));
   });
+});
+
+app.post('/api/action/start-match', async (req, res) => {
+  if (!rcon.connected()) return res.status(503).json({ ok: false, error: 'RCON nao conectado' });
+  try {
+    res.json(await startCompetitiveMatchAction());
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
 });
 
 app.post('/api/action/changemap', async (req, res) => {
@@ -1584,7 +1754,9 @@ app.get('/api/event/matches/:id', (req, res) => {
 let playerStats = new Map();  // steamid -> stats
 let lastKnownRound = 0;
 let liveStatsSnapshot = null;
-const LIVE_STATS_MAX_AGE_MS = 3500;
+let lastLiveStatsLogAt = 0;
+let liveMoneyByPlayer = new Map();
+const LIVE_STATS_MAX_AGE_MS = 10000;
 
 function getOrCreatePlayer(steamid, name, team) {
   if (!steamid) return null;
@@ -1631,7 +1803,6 @@ function configuredSteamIds() {
 function shouldExposeLivePlayer(player) {
   if (!player || (player.team !== 'CT' && player.team !== 'T')) return false;
   if (player.isSpectator === true) return false;
-  if (state.config && state.config.botScenario) return player.isBot === true;
 
   const roster = configuredSteamIds();
   if (roster.size > 0 && !player.isBot) {
@@ -1641,10 +1812,45 @@ function shouldExposeLivePlayer(player) {
   return true;
 }
 
+function sortLivePlayers(a, b) {
+  if (a.team !== b.team) return a.team === 'CT' ? -1 : 1;
+  if (a.isBot !== b.isBot) return a.isBot ? 1 : -1;
+  return b.score - a.score || b.kills - a.kills || a.deaths - b.deaths;
+}
+
+function capLiveStatsToFivePerTeam(stats) {
+  const result = [];
+  for (const team of ['CT', 'T']) {
+    const teamPlayers = stats.filter((player) => player.team === team).sort(sortLivePlayers);
+    result.push(...teamPlayers.slice(0, 5));
+  }
+  return result.sort(sortLivePlayers);
+}
+
+function enforceFivePerTeamWithBots(stats) {
+  if (!state.config || !state.config.botScenario || !rcon.connected()) return;
+
+  for (const team of ['CT', 'T']) {
+    const players = stats.filter((player) => player.team === team).sort(sortLivePlayers);
+    if (players.length <= 5) continue;
+
+    const excess = players.slice(5).filter((player) => player.isBot);
+    excess.forEach((bot) => {
+      send(`bot_kick "${q(bot.name)}"`).catch((err) => log(`Falha ao remover bot excedente ${bot.name}: ${err.message}`, 'error'));
+    });
+
+    const humans = players.filter((player) => !player.isBot).length;
+    const targetBots = Math.max(0, 10 - humans);
+    send(`bot_quota ${targetBots}`).catch((err) => log(`Falha ao ajustar bot_quota ${targetBots}: ${err.message}`, 'error'));
+    log(`Bot Lab: limitando ${team} a 5 jogadores; removendo ${excess.length} bot(s) excedente(s).`, 'warn');
+  }
+}
+
 function resetPlayerStats() {
   playerStats = new Map();
   lastKnownRound = 0;
   liveStatsSnapshot = null;
+  liveMoneyByPlayer = new Map();
   log('Stats de jogadores zeradas (novo mapa).', 'info');
   broadcast('playerstats', { stats: [], roundsPlayed: 0 });
 }
@@ -1738,8 +1944,22 @@ function normalizeLiveStat(player) {
   const damage = Number(player.damage || 0);
   const rounds = Math.max(lastKnownRound, 1);
   const team = normalizeTeam(player.team);
+  const steamid = String(player.steamid || player.userId || player.name || Math.random());
+  const health = Number(player.health || 0);
+  const alive = Boolean(player.alive);
+  const rawMoney = Number(player.money || 0);
+  const previousMoney = liveMoneyByPlayer.get(steamid);
+  const pluginDeadMoneyLooksInvalid = state.config?.botScenario && !alive && rawMoney === 16000;
+  const money = pluginDeadMoneyLooksInvalid
+    ? (Number.isFinite(previousMoney) ? previousMoney : 800)
+    : rawMoney;
+
+  if (Number.isFinite(money) && !pluginDeadMoneyLooksInvalid) {
+    liveMoneyByPlayer.set(steamid, money);
+  }
+
   return {
-    steamid: String(player.steamid || player.userId || player.name || Math.random()),
+    steamid,
     name: String(player.name || 'Player'),
     team,
     kills,
@@ -1761,10 +1981,10 @@ function normalizeLiveStat(player) {
     firstDeaths: Number(player.firstDeaths || 0),
     clutchesWon: Number(player.clutchesWon || 0),
     score: Number(player.score || 0),
-    money: Number(player.money || 0),
-    health: Number(player.health || 0),
+    money,
+    health,
     armor: Number(player.armor || 0),
-    alive: Boolean(player.alive),
+    alive,
     isBot: Boolean(player.isBot),
     isSpectator: team === 'SPEC' || Boolean(player.isSpectator),
     source: 'live-plugin',
@@ -1928,19 +2148,22 @@ app.post('/api/matchzy/webhook', (req, res) => {
 app.post('/api/live-stats', (req, res) => {
   try {
     const body = req.body || {};
-    const stats = Array.isArray(body.players)
+    const rawStats = Array.isArray(body.players)
       ? body.players.map(normalizeLiveStat).filter(shouldExposeLivePlayer)
       : [];
-    stats.sort((a, b) => {
-      if (a.team !== b.team) return a.team === 'CT' ? -1 : 1;
-      return b.score - a.score || b.kills - a.kills || a.deaths - b.deaths;
-    });
+    rawStats.sort(sortLivePlayers);
+    enforceFivePerTeamWithBots(rawStats);
+    const stats = capLiveStatsToFivePerTeam(rawStats);
     liveStatsSnapshot = {
       source: body.source || 'counterstrikesharp',
       receivedAt: Date.now(),
       gameTime: body.time || null,
       stats,
     };
+    if (Date.now() - lastLiveStatsLogAt > 10000) {
+      log(`Live stats recebido: ${stats.length} players (${liveStatsSnapshot.source}).`, stats.length ? 'ok' : 'warn');
+      lastLiveStatsLogAt = Date.now();
+    }
     broadcast('playerstats', {
       stats,
       roundsPlayed: lastKnownRound,
@@ -1967,11 +2190,12 @@ app.get('/api/matchzy/playerstats', async (req, res) => {
   }
   const stats = snapshotPlayerStats();
   if (stats.length || !rcon.connected()) {
-    return res.json({ ok: true, stats, roundsPlayed: lastKnownRound });
+    return res.json({ ok: true, stats, roundsPlayed: lastKnownRound, source: stats.length ? 'matchzy-events' : undefined, live: false });
   }
   const status = await send('status');
-  if (!status.ok) return res.json({ ok: true, stats: [], roundsPlayed: lastKnownRound });
-  res.json({ ok: true, stats: parseServerStatusPlayers(status.response), roundsPlayed: lastKnownRound, source: 'server-status' });
+  if (!status.ok) return res.json({ ok: true, stats: [], roundsPlayed: lastKnownRound, live: false });
+  const parsed = parseServerStatusPlayers(status.response);
+  res.json({ ok: true, stats: parsed, roundsPlayed: lastKnownRound, source: parsed.length ? 'server-status' : undefined, live: false });
 });
 
 app.post('/api/matchzy/playerstats/reset', (req, res) => {

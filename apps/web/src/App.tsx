@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from './api/client';
 import { Shell } from './components/Shell';
+import { BroadcastPage } from './pages/BroadcastPage';
 import { ConsolePage } from './pages/ConsolePage';
 import { EventPage } from './pages/EventPage';
 import { MatchPage } from './pages/MatchPage';
@@ -68,6 +69,7 @@ const defaultEventSetup: EventSetupConfig = {
 };
 
 export function App() {
+  const broadcastRoute = window.location.pathname === '/transmissao' || window.location.pathname === '/overlay';
   const [tab, setTab] = useState<TabKey>('setup');
   const [status, setStatus] = useState<ServerStatus | null>(null);
   const [score, setScore] = useState<ScoreStatus | null>(null);
@@ -175,7 +177,7 @@ export function App() {
           active={active}
           onConfigChange={setConfig}
           onLaunch={async (profile = 'competitive') => {
-            const next = { ...config, profile, skins: profile === 'mix' };
+            const next = { ...config, profile };
             setScore(null);
             setBackups([]);
             setStats([]);
@@ -190,9 +192,9 @@ export function App() {
               eventName: `${config.eventName || 'MT PRO LEAGUE'} - BOT LAB`,
               teamCT: config.teamCT && config.teamCT !== 'Team Alpha' ? config.teamCT : 'BOT CT',
               teamT: config.teamT && config.teamT !== 'Team Beta' ? config.teamT : 'BOT TR',
-              profile: 'competitive',
-              skins: false,
-              useMatchzy: false,
+              profile: 'mix',
+              skins: config.skins,
+              useMatchzy: true,
               gotv: true,
               demo: true,
               warmup: true,
@@ -334,6 +336,10 @@ export function App() {
 
     return <PlaceholderPage title="Veto" />;
   }, [active, backups, command, config, consoleLogs, eventPlan, eventSetup, eventStats, logs, score, stats, status, tab, veto]);
+
+  if (broadcastRoute) {
+    return <BroadcastPage initialScore={score} initialStats={stats} initialStatus={status} />;
+  }
 
   return (
     <Shell status={status} tab={tab} onTabChange={setTab}>

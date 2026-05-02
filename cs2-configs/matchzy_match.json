@@ -1,8 +1,8 @@
 {
-  "matchid": 1777670010590,
+  "matchid": 1777691627564,
   "num_maps": 1,
   "maplist": [
-    "de_nuke"
+    "de_mirage"
   ],
   "players_per_team": 5,
   "min_players_to_ready": 10,
@@ -10,27 +10,40 @@
   "skip_veto": true,
   "veto_first": "team1",
   "map_sides": [
-    "knife"
+    "team1_ct"
   ],
   "clinch_series": true,
-  "simulation": false,
   "maxRounds": 24,
   "overtimeMode": "enabled",
   "overtimeSegments": 3,
   "team1": {
     "id": "team1",
-    "name": "Team Alpha",
-    "tag": "TEAM",
-    "players": {}
+    "name": "BOT CT",
+    "tag": "BOT ",
+    "players": {
+      "76561199000010001": "BOT CT 1",
+      "76561199000010002": "BOT CT 2",
+      "76561199000010003": "BOT CT 3",
+      "76561199000010004": "BOT CT 4",
+      "76561199000010005": "BOT CT 5"
+    }
   },
   "team2": {
     "id": "team2",
-    "name": "Team Beta",
-    "tag": "TEAM",
-    "players": {}
+    "name": "BOT TR",
+    "tag": "BOT ",
+    "players": {
+      "76561199000020001": "BOT TR 1",
+      "76561199000020002": "BOT TR 2",
+      "76561199000020003": "BOT TR 3",
+      "76561199000020004": "BOT TR 4",
+      "76561199000020005": "BOT TR 5"
+    }
   },
   "cvars": {
     "mp_maxrounds": "24",
+    "mp_startmoney": "800",
+    "mp_afterroundmoney": "0",
     "mp_overtime_enable": "1",
     "mp_overtime_maxrounds": "6",
     "mp_overtime_startmoney": "10000",
@@ -38,12 +51,12 @@
     "mp_technical_timeout_duration_s": "120",
     "sv_pure": "0",
     "matchzy_minimum_ready_required": "10",
-    "matchzy_autoready_enabled": "false",
+    "matchzy_autoready_enabled": "true",
     "matchzy_autoready_simulation_enabled": "false",
     "matchzy_autoready_simulation_allow_start_without_humans": "false",
     "matchzy_autoready_simulation_knife_use_safe_mode": "false",
-    "bot_quota": "0",
+    "bot_quota": "10",
     "bot_quota_mode": "normal",
-    "bot_difficulty": "2"
+    "bot_difficulty": "3"
   }
 }

@@ -38,14 +38,28 @@ mp_competitive_official_5v5 1
 
 // MR12 - padrao oficial CS2 Major desde Setembro 2023
 mp_maxrounds ${maxRounds}
+mp_startmoney 800
+mp_afterroundmoney 0
+mp_maxmoney 16000
 mp_halftime 1
 mp_halftime_duration 15
 mp_freezetime 15
 mp_buytime 20
 mp_buy_anywhere 0
+sv_infinite_ammo 0
 mp_roundtime 1.92
 mp_roundtime_defuse 1.92
 mp_c4timer 40
+mp_free_armor 0
+mp_respawn_on_death_ct 0
+mp_respawn_on_death_t 0
+mp_playercashawards 1
+mp_teamcashawards 1
+mp_friendlyfire 0
+ff_damage_reduction_bullets 0
+ff_damage_reduction_grenade 0
+ff_damage_reduction_grenade_self 1
+ff_damage_reduction_other 0
 
 // Overtime MR3 - $10.000 (Valve Major standard)
 ${c.overtime ? `mp_overtime_enable 1
@@ -95,6 +109,10 @@ mp_warmup_start
 sv_infinite_ammo 1
 mp_startmoney 65535
 mp_buy_anywhere 1
+mp_friendlyfire 0
+ff_damage_reduction_bullets 0
+ff_damage_reduction_grenade 0
+ff_damage_reduction_other 0
 mp_give_player_c4 1
 mp_death_drop_gun 0
 say "========== ${evt} =========="
@@ -113,12 +131,22 @@ function matchCfg(c) {
   const timeoutDur = Number(c.timeoutDur || 30);
   return `// match.cfg - Partida oficial
 // MR12 | Timeouts: 3x30s | OT: MR3 $10.000
-mp_warmup_end
-mp_restartgame 1
 mp_maxrounds ${maxRounds}
 mp_startmoney 800
+mp_afterroundmoney 0
+mp_maxmoney 16000
 mp_buy_anywhere 0
 sv_infinite_ammo 0
+mp_free_armor 0
+mp_respawn_on_death_ct 0
+mp_respawn_on_death_t 0
+mp_playercashawards 1
+mp_teamcashawards 1
+mp_friendlyfire 0
+ff_damage_reduction_bullets 0
+ff_damage_reduction_grenade 0
+ff_damage_reduction_grenade_self 1
+ff_damage_reduction_other 0
 mp_give_player_c4 1
 mp_death_drop_gun 1
 mp_freezetime 15
@@ -131,6 +159,8 @@ mp_team_timeout_ot_each_half_limit 1
 mp_pause_match_limit_rounds 0
 mp_technical_timeout_per_team 1
 mp_technical_timeout_duration_s 120
+mp_warmup_end
+mp_restartgame 1
 ${c.autoDemo ? `tv_record "demo_${ts}"
 say "== Demo gravando: demo_${ts} =="` : ''}
 say "== PARTIDA INICIADA - ${evt} =="
@@ -146,6 +176,10 @@ mp_give_player_c4 0
 mp_startmoney 0
 mp_buy_anywhere 0
 sv_infinite_ammo 0
+mp_friendlyfire 0
+ff_damage_reduction_bullets 0
+ff_damage_reduction_grenade 0
+ff_damage_reduction_other 0
 mp_death_drop_gun 0
 mp_maxrounds 1
 mp_roundtime 2
@@ -161,6 +195,10 @@ mp_warmup_pausetimer 1
 sv_infinite_ammo 2
 mp_buy_anywhere 1
 mp_startmoney 65535
+mp_friendlyfire 0
+ff_damage_reduction_bullets 0
+ff_damage_reduction_grenade 0
+ff_damage_reduction_other 0
 mp_freezetime 0
 mp_roundtime 60
 mp_roundtime_defuse 60
